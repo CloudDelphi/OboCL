@@ -7,7 +7,7 @@
 // This software is distributed without any warranty.
 //
 // @author Domenico Mammola (mimmo71@gmail.com - www.mammola.net)
-unit UramakiKGridPlate;
+unit UramakiKGridAsPivotPlate;
 
 interface
 
@@ -18,7 +18,7 @@ interface
 
 
 uses
-  kgrids, Classes, Controls, Menus,
+  kgrids, Classes, Controls, Menus, Dialogs,
   {$IFDEF FPC}
   LCLIntf,
   LclType,
@@ -27,6 +27,7 @@ uses
   LMessages,
   {$ENDIF}
   mPivoter, mDataProviderInterfaces, mFilterPanel, mFilter, mXML, mIntList, mMaps,
+  mKGridAsPivotHelper, mSpreadsheetAsPivotHelper, mQuickReadOnlyVirtualDataSet,
   UramakiBase, UramakiToolbar;
 
 const
@@ -37,7 +38,13 @@ resourcestring
   SConfigureCommandHint = 'Configure...';
   SConfigurePivotCommandHint = 'Configure pivot...';
   SConfigurePivotCommandCaption = 'Configure pivot';
-
+  SExportPivotAsXlsCommandHint = 'Export pivot data to Excel file (.xls)';
+  SExportPivotAsXlsCommandCaption = 'Export to Excel file (.xls)...';
+  SConfirmFileOverwriteCaption = 'Confirm';
+  SConfirmFileOverwriteMessage = 'The selected file already exists. Overwrite it?';
+  SUnableToWriteFileMessage = 'Unable to write file. Check if the file is open by another application. If so, close it and run this command again. Detail:';
+  SWantToOpenFileMessage = 'Do you want to open the file?';
+  SExcelFileDescription = 'Excel 97-2003 files';
 
 type
 
@@ -48,12 +55,12 @@ type
     procedure InvokeChildsClear;
   protected
     FPivoter : TmPivoter;
-    FDataProvider : IVDDataProvider;
     FGrid : TKGrid;
+    FGridHelper : TmKGridAsPivotHelper;
     FFilterPanel : TmFilterPanel;
     FToolbar : TUramakiToolbar;
     FConfigurePopupMenu : TPopupMenu;
-    FNumericColumns : TmIntegerDictionary;
+    FSaveDialog : TSaveDialog;
 
     procedure OnClearFilter (Sender : TObject);
     procedure OnExecuteFilter (Sender : TObject);
@@ -61,7 +68,8 @@ type
     procedure ProcessClearChilds(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF}); message WM_USER_CLEARCHILDS;
     procedure CreateToolbar(aImageList : TImageList; aConfigureImageIndex, aRefreshChildsImageIndex, aGridCommandsImageIndex : integer);
     procedure OnEditSettings(Sender : TObject);
-    procedure OnDrawGridCell (Sender: TObject; ACol, ARow: Integer; R: TRect; State: TKGridDrawState);
+    procedure OnExportToXlsFile(Sender : TObject);
+    function ConfirmFileOverwrite : boolean;
   public
     constructor Create(TheOwner: TComponent); override;
     destructor Destroy; override;
@@ -79,8 +87,17 @@ implementation
 
 uses
   sysutils,
-  kgraphics,
-  mWaitCursor, mPivotSettings, mPivotSettingsForm, mPivoterToKGrid;
+  mWaitCursor, mPivotSettings, mPivotSettingsForm, mNullables;
+
+var
+  _LastUsedFolderForExport : TNullableString;
+
+function GetLastUsedFolderForExport: TNullableString;
+begin
+  if not Assigned(_LastUsedFolderForExport) then
+    _LastUsedFolderForExport := TNullableString.Create();
+  Result := _LastUsedFolderForExport;
+end;
 
 { TUramakiKGridAsPivotPlate }
 
@@ -91,7 +108,11 @@ end;
 
 procedure TUramakiKGridAsPivotPlate.OnClearFilter(Sender: TObject);
 begin
-  //
+  if Assigned(FFilterPanel) then
+  begin
+    FFilterPanel.ClearAll();
+    Self.Clear;
+  end;
 end;
 
 procedure TUramakiKGridAsPivotPlate.OnExecuteFilter(Sender: TObject);
@@ -145,6 +166,16 @@ begin
   mItm.Hint:= SConfigurePivotCommandHint;
   mItm.Caption:= SConfigurePivotCommandCaption;
 
+  mItm := TMenuItem.Create(FConfigurePopupMenu);
+  FConfigurePopupMenu.Items.Add(mItm);
+  mItm.Caption:= '-';
+
+  mItm := TMenuItem.Create(FConfigurePopupMenu);
+  FConfigurePopupMenu.Items.Add(mItm);
+  mItm.OnClick:= Self.OnExportToXlsFile;
+  mItm.Hint:= SExportPivotAsXlsCommandHint;
+  mItm.Caption:= SExportPivotAsXlsCommandCaption;
+
   FToolbar.Update;
 end;
 
@@ -166,7 +197,6 @@ begin
           frm.UpdateSettingsInPivot(FPivoter);
           FPivoter.Calculate;
           Self.DrawPivot;
-          //Intf.ApplySettings(FSettings);
         finally
           TWaitCursor.UndoWaitCursor('TUramakiKGridAsPivotPlate.OnEditSettings');
         end;
@@ -177,23 +207,60 @@ begin
   end;
 end;
 
-procedure TUramakiKGridAsPivotPlate.OnDrawGridCell(Sender: TObject; ACol, ARow: Integer; R: TRect; State: TKGridDrawState);
+procedure TUramakiKGridAsPivotPlate.OnExportToXlsFile(Sender: TObject);
+var
+  fs : TFileStream;
+  hlp : TmSpreadsheetAsPivotHelper;
 begin
-  // https://forum.lazarus.freepascal.org/index.php/topic,44833.msg315562.html#msg315562
+  FSaveDialog.DefaultExt:= 'xls';
+  FSaveDialog.Filter:=SExcelFileDescription + '|*.xls';
 
-  FGrid.Cell[ACol, ARow].ApplyDrawProperties;
+  if FSaveDialog.FileName <> '' then
+    FSaveDialog.FileName := ChangeFileExt(FSaveDialog.FileName, FSaveDialog.DefaultExt);
 
-  if (ARow < FGrid.FixedRows) and (ACol >= FGrid.FixedCols) then
+  if GetLastUsedFolderForExport.NotNull and DirectoryExists(GetLastUsedFolderForExport.AsString) then
+    FSaveDialog.InitialDir:= GetLastUsedFolderForExport.AsString;
+
+  if FSaveDialog.Execute then
   begin
-    FGrid.CellPainter.HAlign:=halCenter;
-    FGrid.CellPainter.VAlign:=valCenter;
-  end
-  else if FNumericColumns.Contains(ACol) then
-  begin
-    FGrid.CellPainter.HAlign:=halRight;
+    if FileExists(FSaveDialog.FileName) then
+    begin
+      if not ConfirmFileOverwrite then
+        exit;
+    end;
+    GetLastUsedFolderForExport.Value:= ExtractFilePath(FSaveDialog.FileName);
+    try
+      try
+        TWaitCursor.ShowWaitCursor('OnExportToXlsFile');
+        fs := TFileStream.Create(FSaveDialog.FileName, fmCreate);
+        try
+          hlp := TmSpreadsheetAsPivotHelper.Create;
+          try
+            hlp.ExportPivotAsXls(fs, FPivoter);
+          finally
+            hlp.Free;
+          end;
+        finally
+          fs.Free;
+        end;
+      finally
+        TWaitCursor.UndoWaitCursor('OnExportToXlsFile');
+      end;
+
+      if MessageDlg(SWantToOpenFileMessage, mtConfirmation, mbYesNo, 0) = mrYes then
+        OpenDocument(FSaveDialog.FileName);
+    except
+      on E:Exception do
+      begin
+        MessageDlg(SUnableToWriteFileMessage + sLineBreak + e.Message, mtInformation, [mbOk], 0);
+      end;
+    end;
   end;
+end;
 
-  FGrid.CellPainter.DefaultDraw;
+function TUramakiKGridAsPivotPlate.ConfirmFileOverwrite: boolean;
+begin
+  Result := MessageDlg(SConfirmFileOverwriteCaption, SConfirmFileOverwriteMessage, mtConfirmation, mbYesNo, 0) = mrYes;
 end;
 
 constructor TUramakiKGridAsPivotPlate.Create(TheOwner: TComponent);
@@ -206,22 +273,24 @@ begin
   FGrid.RowCount:= 0;
   FGrid.ColCount:= 0;
   FGrid.ClearGrid;
-  FGrid.OnDrawCell:= Self.OnDrawGridCell;
-  FNumericColumns := TmIntegerDictionary.Create(false);
+  FGrid.Flat:= true;
+  FGridHelper := TmKGridAsPivotHelper.Create;
+  FGridHelper.Init(FPivoter, FGrid);
+  FSaveDialog := TSaveDialog.Create(nil);
 end;
 
 destructor TUramakiKGridAsPivotPlate.Destroy;
 begin
   FPivoter.Free;
   FreeAndNil(FToolbar);
-  FNumericColumns.Free;
+  FGridHelper.Free;
+  FSaveDialog.Free;
   inherited Destroy;
 end;
 
 procedure TUramakiKGridAsPivotPlate.Init(aDataProvider: IVDDataProvider);
 begin
-  FDataProvider := aDataProvider;
-  FPivoter.DataProvider := FDataProvider;
+  FPivoter.Provider.Init(aDataProvider);
 end;
 
 procedure TUramakiKGridAsPivotPlate.ClearPivot;
@@ -233,26 +302,15 @@ begin
     FGrid.FixedRows:= 0;
     FGrid.RowCount:= 0;
     FGrid.ColCount:= 0;
-    FNumericColumns.Clear;
+    FGridHelper.Clear;
   finally
     FGrid.UnlockUpdate;
   end;
 end;
 
 procedure TUramakiKGridAsPivotPlate.DrawPivot;
-var
-  list : TCardinalList;
-  i : integer;
 begin
-  list := TCardinalList.Create;
-  try
-    ApplyPivotToKGrid(FPivoter, FGrid, list);
-    FNumericColumns.Clear;
-    for i := 0 to list.Count - 1 do
-      FNumericColumns.Add(list.Nums[i], FNumericColumns);
-  finally
-    list.Free;
-  end;
+  FGridHelper.ApplyPivotToGrid;
 end;
 
 procedure TUramakiKGridAsPivotPlate.LoadConfigurationFromXML(aXMLElement: TmXmlElement);
@@ -262,7 +320,7 @@ begin
   cursor := TmXmlElementCursor.Create(aXMLElement, 'pivot');
   try
     if cursor.Count = 1 then
-      LoadPivotConfigurationToXML(FPivoter.VerticalGroupByDefs, FPivoter.HorizontalGroupByDefs, FPivoter.SummaryDefinitions, cursor.Elements[0]);
+      LoadPivotConfigurationToXML(FPivoter, cursor.Elements[0]);
   finally
     cursor.Free;
   end;
@@ -270,16 +328,25 @@ end;
 
 procedure TUramakiKGridAsPivotPlate.SaveConfigurationToXML(aXMLElement: TmXmlElement);
 begin
-  SavePivotConfigurationToXML(FPivoter.VerticalGroupByDefs, FPivoter.HorizontalGroupByDefs, FPivoter.SummaryDefinitions, aXMLElement.AddElement('pivot'));
+  SavePivotConfigurationToXML(FPivoter, aXMLElement.AddElement('pivot'));
 end;
 
 procedure TUramakiKGridAsPivotPlate.Clear;
 begin
-  Self.ClearPivot;
-  FPivoter.Clear(false);
-  if Assigned(FPivoter.DataProvider) then
-    FPivoter.DataProvider.Clear;
+  FGrid.LockUpdate;
+  try
+    Self.ClearPivot;
+    FPivoter.Clear(false);
+    if Assigned(FPivoter.Provider) then
+      FPivoter.Provider.Clear;
+  finally
+    FGrid.UnlockUpdate;
+  end;
   InvokeChildsClear;
 end;
+
+finalization
+  FreeAndNil(_LastUsedFolderForExport);
+
 
 end.

@@ -17,17 +17,16 @@ interface
 {$ENDIF}
 
 uses
-  mPivoter, mXML, mSummary;
+  mPivoter, mXML, mSummary, mNullables;
 
-procedure SavePivotConfigurationToXML(const aVerticalGroupByDefs, aHorizontalGroupByDefs : TmGroupByDefs; const aSummaryDefinitions : TmSummaryDefinitions; aXMLElement : TmXmlElement);
-procedure LoadPivotConfigurationToXML(aVerticalGroupByDefs, aHorizontalGroupByDefs : TmGroupByDefs; aSummaryDefinitions : TmSummaryDefinitions; aXMLElement : TmXmlElement);
-
+procedure SavePivotConfigurationToXML(const aPivoter : TmPivoter; aXMLElement : TmXmlElement);
+procedure LoadPivotConfigurationToXML(const aPivoter : TmPivoter; aXMLElement : TmXmlElement);
 
 implementation
 
 uses
   typinfo, DB,
-  mSummaryToXml;
+  mSummaryToXml, mVirtualDatasetFormulasToXml;
 
 procedure SaveGroupByDef (const aGroupByDef : TmGroupByDef; aXMLElement : TmXmlElement);
 begin
@@ -35,6 +34,9 @@ begin
   aXmlElement.SetAttribute('dataType', GetEnumName(TypeInfo(TFieldType), integer(aGroupByDef.DataType)));
   aXmlElement.SetAttribute('operationKind', GetEnumName(TypeInfo(TmGroupByOperationKind), integer(aGroupByDef.OperationKind)));
   aXMLElement.SetAttribute('formula', aGroupByDef.Formula);
+  aXMLElement.SetAttribute('displayLabel', aGroupByDef.DisplayLabel);
+  aXMLElement.SetAttribute('displayFormat', aGroupByDef.DisplayFormat);
+  aXMLElement.SetAttribute('sortBy', GetEnumName(TypeInfo(TmSortByCondition), integer(aGroupByDef.SortBy)));
 end;
 
 procedure LoadGroupByDef (aGroupByDef : TmGroupByDef; const aXMLElement : TmXmlElement);
@@ -42,49 +44,85 @@ begin
   aGroupByDef.FieldName := aXMLElement.GetAttribute('fieldName');
   aGroupByDef.DataType:= TFieldType(GetEnumValue(TypeInfo(TFieldType), aXmlElement.GetAttribute('dataType')));
   aGroupByDef.OperationKind:= TmGroupByOperationKind(GetEnumValue(TypeInfo(TmGroupByOperationKind), aXmlElement.GetAttribute('operationKind')));
-  aGroupByDef.Formula := aXMLElement.GetAttribute('formula');
+  aXMLElement.GetAttribute('formula', aGroupByDef.Formula);
+  aXMLElement.GetAttribute('displayLabel', aGroupByDef.DisplayLabel);
+  aXMLElement.GetAttribute('displayFormat', aGroupByDef.DisplayFormat);
+  aGroupByDef.SortBy:= TmSortByCondition(GetEnumValue(TypeInfo(TmSortByCondition), aXmlElement.GetAttribute('sortBy')));
 end;
 
-procedure SavePivotConfigurationToXML(const aVerticalGroupByDefs, aHorizontalGroupByDefs: TmGroupByDefs; const aSummaryDefinitions: TmSummaryDefinitions; aXMLElement: TmXmlElement);
+procedure SavePropertiesToXmlElement(aPivoter: TmPivoter; const aXMLElement : TmXmlElement);
+begin
+  aXMLElement.SetBooleanAttribute('showVerticalGrandTotal', (poVerticalGrandTotal in aPivoter.Options));
+  aXMLElement.SetBooleanAttribute('showHorizontalGrandTotal', (poHorizontalGrandTotal in aPivoter.Options));
+end;
+
+procedure LoadPropertiesFromXmlElement(aPivoter: TmPivoter; const aXMLElement : TmXmlElement);
+begin
+  if aXMLElement.GetBooleanAttribute('showVerticalGrandTotal', false) then
+    aPivoter.Options:= aPivoter.Options + [poVerticalGrandTotal]
+  else
+    aPivoter.Options:= aPivoter.Options - [poVerticalGrandTotal];
+
+  if aXMLElement.GetBooleanAttribute('showHorizontalGrandTotal', false) then
+    aPivoter.Options:= aPivoter.Options + [poHorizontalGrandTotal]
+  else
+    aPivoter.Options:= aPivoter.Options - [poHorizontalGrandTotal];
+end;
+
+procedure SavePivotConfigurationToXML(const aPivoter : TmPivoter; aXMLElement: TmXmlElement);
 var
   i : integer;
   curElement : TmXmlElement;
 begin
-  for i:= 0 to aVerticalGroupByDefs.Count - 1 do
+  for i:= 0 to aPivoter.VerticalGroupByDefs.Count - 1 do
   begin
     curElement := aXMLElement.AddElement('verticalGroupByDef');
-    SaveGroupByDef(aVerticalGroupByDefs.Get(i), curElement);
+    SaveGroupByDef(aPivoter.VerticalGroupByDefs.Get(i), curElement);
   end;
-  for i:= 0 to aHorizontalGroupByDefs.Count - 1 do
+  for i:= 0 to aPivoter.HorizontalGroupByDefs.Count - 1 do
   begin
     curElement := aXMLElement.AddElement('horizontalGroupByDef');
-    SaveGroupByDef(aHorizontalGroupByDefs.Get(i), curElement);
+    SaveGroupByDef(aPivoter.HorizontalGroupByDefs.Get(i), curElement);
   end;
-  SaveSummaryDefinitionsToXmlElement(aSummaryDefinitions, aXMLElement);
+  SaveSummaryDefinitionsToXmlElement(aPivoter.SummaryDefinitions, aXMLElement);
+
+  SavePropertiesToXmlElement(aPivoter, aXMLElement);
+
+  SaveFormulaFieldsToXmlElement(aPivoter.Provider.FormulaFields, aXMLElement.AddElement('formulaFields'));
 end;
 
-procedure LoadPivotConfigurationToXML(aVerticalGroupByDefs, aHorizontalGroupByDefs: TmGroupByDefs; aSummaryDefinitions: TmSummaryDefinitions; aXMLElement: TmXmlElement);
+procedure LoadPivotConfigurationToXML(const aPivoter : TmPivoter; aXMLElement: TmXmlElement);
 var
   cursor : TmXmlElementCursor;
   i : integer;
 begin
-  aVerticalGroupByDefs.Clear;
+  aPivoter.VerticalGroupByDefs.Clear;
   cursor := TmXmlElementCursor.Create(aXMLElement, 'verticalGroupByDef');
   try
     for i := 0 to cursor.Count - 1 do
-      LoadGroupByDef(aVerticalGroupByDefs.Add, cursor.Elements[i]);
+      LoadGroupByDef(aPivoter.VerticalGroupByDefs.Add, cursor.Elements[i]);
   finally
     cursor.Free;
   end;
-  aHorizontalGroupByDefs.Clear;
+  aPivoter.HorizontalGroupByDefs.Clear;
   cursor := TmXmlElementCursor.Create(aXMLElement, 'horizontalGroupByDef');
   try
     for i := 0 to cursor.Count - 1 do
-      LoadGroupByDef(aHorizontalGroupByDefs.Add, cursor.Elements[i]);
+      LoadGroupByDef(aPivoter.HorizontalGroupByDefs.Add, cursor.Elements[i]);
   finally
     cursor.Free;
   end;
-  LoadSummaryDefinitionsFromXmlElement(aSummaryDefinitions, aXMLElement);
+  LoadSummaryDefinitionsFromXmlElement(aPivoter.SummaryDefinitions, aXMLElement);
+  LoadPropertiesFromXmlElement(aPivoter, aXMLElement);
+
+  aPivoter.Provider.FormulaFields.Clear;
+  cursor := TmXmlElementCursor.Create(aXMLElement, 'formulaFields');
+  try
+    if cursor.Count > 0 then
+      LoadFormulaFieldsFromXmlElement(aPivoter.Provider.FormulaFields, cursor.Elements[0]);
+  finally
+    cursor.Free;
+  end;
 end;
 
 end.

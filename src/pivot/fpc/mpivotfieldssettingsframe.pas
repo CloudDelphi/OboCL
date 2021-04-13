@@ -8,7 +8,7 @@
 //
 // @author Domenico Mammola (mimmo71@gmail.com - www.mammola.net)
 
-unit mPivotSettingsFrame;
+unit mPivotFieldsSettingsFrame;
 
 {$mode objfpc}{$H+}
 
@@ -16,7 +16,7 @@ interface
 
 uses
   Classes, SysUtils, BufDataset, FileUtil, Forms, Controls,
-  Menus, ExtCtrls, StdCtrls, EditBtn, contnrs,
+  Menus, ExtCtrls, StdCtrls, EditBtn, contnrs, DB,
 
   OMultiPanel, OMultiPanelSetup,
 
@@ -29,8 +29,11 @@ resourcestring
   SLabelVerticalFields = 'Vertical fields';
   SLabelDataFields = 'Data fields';
   SLabelGroupByDefOperator = 'Group-by operator:';
+  SLabelGroupByDefSortBy = 'Sort';
   SLabelSummaryOperator = 'Summary operator:';
-  sMenuItemRemove = 'Remove..';
+  SMenuItemRemove = 'Remove..';
+  SLabelLabel = 'Label:';
+  SLabelFormat = 'Display format:';
 
 type
 
@@ -41,7 +44,7 @@ type
     FVerticalGroupByDefs : TmGroupByDefs;
     FHorizontalGroupByDefs : TmGroupByDefs;
     FSummaryDefinitions : TmSummaryDefinitions;
-    FFieldDefs: TmVirtualFieldDefs;
+    FFieldDefs: TFieldDefs;
     FSomethingChanged : boolean;
 
     FRootPanel : TOMultiPanel;
@@ -50,14 +53,20 @@ type
     FGroupDefPropertiesPanel, FSummaryPropertiesPanel : TPanel;
     FGroupDefPropertiesOperatorLabel : TLabel;
     FGroupDefPropertiesOperatorCB : TComboBox;
+    FGroupDefPropertiesLELabel, FGroupDefPropertiesLEFormat: TLabeledEdit;
+    FGroupDefPropertiesFormatPanel, FGroupDefPropertiesLabelPanel: TPanel;
+    FGroupDefPropertiesSortByLabel : TLabel;
+    FGroupDefPropertiesSortByCB : TComboBox;
     FSummaryOperatorLabel : TLabel;
     FSummaryOperatorCB : TComboBox;
+    FSummaryLELabel, FSummaryLEFormat: TLabeledEdit;
+    FSummaryPropertiesFormatPanel, FSummaryPropertiesLabelPanel: TPanel;
 
     FListBoxFields, FListBoxHorizontalFields, FListBoxVerticalFields, FListBoxDataFields : TListBox;
     FFieldsFindBtn : TEditButton;
     FLabelFields, FLabelHorizontalFields, FLabelVerticalFields, FLabelDataFields : TLabel;
 
-    FCurrentField : TmVirtualFieldDef;
+    FCurrentField : TFieldDef;
     FCurrentGroupByDef : TmGroupByDef;
     FGarbageGroupByDefs : TmGroupByDefs;
     FCurrentSummary : TmSummaryDefinition;
@@ -82,27 +91,41 @@ type
     procedure LBFieldsDragDrop(Sender, Source: TObject; X, Y: Integer);
     procedure LBFieldsDragOver(Sender, Source: TObject; X, Y: Integer; State: TDragState; var Accept: Boolean);
     procedure LBFieldsSelectionChange(Sender: TObject; User: boolean);
+    procedure LBFieldsEnter (Sender: TObject);
+    procedure DoTriggerLBFieldsChange;
 
     procedure LBHorizontalFieldsDragDrop(Sender, Source: TObject; X, Y: Integer);
     procedure LBHorizontalFieldsDragOver(Sender, Source: TObject; X, Y: Integer; State: TDragState; var Accept: Boolean);
     procedure LBHorizontalFieldsSelectionChange(Sender: TObject; User: boolean);
+    procedure LBHorizontalFieldsEnter(Sender: TObject);
+    procedure DoTriggerLBHorizontalFieldsChange;
 
     procedure LBVerticalFieldsDragDrop(Sender, Source: TObject; X, Y: Integer);
     procedure LBVerticalFieldsDragOver(Sender, Source: TObject; X, Y: Integer; State: TDragState; var Accept: Boolean);
     procedure LBVerticalFieldsSelectionChange(Sender: TObject; User: boolean);
+    procedure LBVerticalFieldsEnter(Sender: TObject);
+    procedure DoTriggerLBVerticalFieldsChange;
 
     procedure LBDataFieldsDragDrop(Sender, Source: TObject; X, Y: Integer);
     procedure LBDataFieldsDragOver(Sender, Source: TObject; X, Y: Integer; State: TDragState; var Accept: Boolean);
     procedure LBDataFieldsSelectionChange(Sender: TObject; User: boolean);
+    procedure LBDataFieldsEnter(Sender: TObject);
+    procedure DoTriggerLBDataFieldsChange;
 
-    function GetLBFieldLine (const aFieldDef : TmVirtualFieldDef) : String;
+    function GetLBFieldLine (const aFieldDef : TFieldDef) : String;
     function GetLBDataFieldLine (const aSummaryDef : TmSummaryDefinition) : String;
     function GetLBVertHorizFieldLine(const aGroupByDef : TmGroupByDef) : String;
 
-    procedure ImportGroupByFromField (const aSource : TmVirtualFieldDef; aDestination : TmGroupByDef);
-    procedure ImportSummaryFromField (const aSource : TmVirtualFieldDef; aDestination : TmSummaryDefinition);
+    procedure ImportGroupByFromField (const aSource : TFieldDef; aDestination : TmGroupByDef);
+    procedure ImportSummaryFromField (const aSource : TFieldDef; aDestination : TmSummaryDefinition);
     procedure OnGroupDefPropertiesOperatorCBChange (aSender : TObject);
+    procedure OnGroupDefPropertiesSortByCBChange (aSender : TObject);
     procedure OnSummaryOperatorCBChange (aSender : TObject);
+    procedure GroupByDefPropertiesLEFormatEditingDone(Sender: TObject);
+    procedure GroupByDefPropertiesLELabelEditingDone(Sender: TObject);
+    procedure SummaryPropertiesLEFormatEditingDone(Sender: TObject);
+    procedure SummaryPropertiesLELabelEditingDone(Sender: TObject);
+
   public
     constructor Create(TheOwner: TComponent); override;
     destructor Destroy; override;
@@ -141,6 +164,21 @@ type
     op : TmSummaryOperator;
     constructor Create(const aOperator : TmSummaryOperator);
   end;
+
+  { TSortByKindShell }
+
+  TSortByKindShell = class
+  public
+    sortBy : TmSortByCondition;
+    constructor Create(const aSortCondition : TmSortByCondition);
+  end;
+
+{ TSortByKindShell }
+
+constructor TSortByKindShell.Create(const aSortCondition: TmSortByCondition);
+begin
+  sortBy := aSortCondition;
+end;
 
 { TSummaryOperatorShell }
 
@@ -185,8 +223,8 @@ begin
   tmpListBox.Canvas.FillRect(ARect);
   if Assigned(tmpListBox.Items.Objects[index]) then
   begin
-    if tmpListBox.Items.Objects[index] is TmVirtualFieldDef then
-      tmpListBox.Canvas.TextRect(ARect, 2, ARect.Top + 2, GetLBFieldLine(tmpListBox.Items.Objects[index] as TmVirtualFieldDef))
+    if tmpListBox.Items.Objects[index] is TFieldDef then
+      tmpListBox.Canvas.TextRect(ARect, 2, ARect.Top + 2, GetLBFieldLine(tmpListBox.Items.Objects[index] as TFieldDef))
     else if tmpListBox.Items.Objects[index] is TmSummaryDefinition then
       tmpListBox.Canvas.TextRect(ARect, 2, ARect.Top + 2, GetLBDataFieldLine(tmpListBox.Items.Objects[index] as TmSummaryDefinition))
     else if tmpListBox.Items.Objects[index] is TmGroupByDef then
@@ -238,10 +276,20 @@ end;
 
 procedure TPivotFieldsSettingsFrame.LBFieldsSelectionChange(Sender: TObject; User: boolean);
 begin
+  DoTriggerLBFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.LBFieldsEnter(Sender: TObject);
+begin
+  DoTriggerLBFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.DoTriggerLBFieldsChange;
+begin
   ClearProperties;
   if (FListBoxFields.SelCount = 1) and (FListBoxFields.ItemIndex >= 0) then
   begin
-    FCurrentField := FListBoxFields.Items.Objects[FListBoxFields.ItemIndex] as TmVirtualFieldDef;
+    FCurrentField := FListBoxFields.Items.Objects[FListBoxFields.ItemIndex] as TFieldDef;
   end;
 end;
 
@@ -261,6 +309,8 @@ begin
     pt.x:= X;
     pt.y:= Y;
     dest := FListBoxHorizontalFields.ItemAtPos(pt, true);
+    if dest = prev then
+      exit;
     old := FListBoxHorizontalFields.Items[prev];
     oldObj := FListBoxHorizontalFields.Items.Objects[prev];
 
@@ -285,7 +335,7 @@ begin
     oldObj := FListBoxFields.Items.Objects[prev];
 
     newGroupBy := FGarbageGroupByDefs.Add;
-    ImportGroupByFromField((oldObj as TmVirtualFieldDef), newGroupBy);
+    ImportGroupByFromField((oldObj as TFieldDef), newGroupBy);
 
     if dest >= 0 then
       FListBoxHorizontalFields.Items.InsertObject(dest, old, newGroupBy)
@@ -302,6 +352,16 @@ begin
 end;
 
 procedure TPivotFieldsSettingsFrame.LBHorizontalFieldsSelectionChange(Sender: TObject; User: boolean);
+begin
+  DoTriggerLBHorizontalFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.LBHorizontalFieldsEnter(Sender: TObject);
+begin
+  DoTriggerLBHorizontalFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.DoTriggerLBHorizontalFieldsChange;
 begin
   ClearProperties;
   if (FListBoxHorizontalFields.SelCount = 1) and (FListBoxHorizontalFields.ItemIndex >= 0) then
@@ -329,6 +389,8 @@ begin
     pt.x:= X;
     pt.y:= Y;
     dest := FListBoxVerticalFields.ItemAtPos(pt, true);
+    if dest = prev then
+      exit;
     old := FListBoxVerticalFields.Items[prev];
     oldObj := FListBoxVerticalFields.Items.Objects[prev];
 
@@ -353,7 +415,7 @@ begin
     oldObj := FListBoxFields.Items.Objects[prev];
 
     newGroupBy := FGarbageGroupByDefs.Add;
-    ImportGroupByFromField((oldObj as TmVirtualFieldDef), newGroupBy);
+    ImportGroupByFromField((oldObj as TFieldDef), newGroupBy);
 
     if dest >= 0 then
       FListBoxVerticalFields.Items.InsertObject(dest, old, newGroupBy)
@@ -370,6 +432,16 @@ begin
 end;
 
 procedure TPivotFieldsSettingsFrame.LBVerticalFieldsSelectionChange(Sender: TObject; User: boolean);
+begin
+  DoTriggerLBVerticalFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.LBVerticalFieldsEnter(Sender: TObject);
+begin
+  DoTriggerLBVerticalFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.DoTriggerLBVerticalFieldsChange;
 begin
   ClearProperties;
   if (FListBoxVerticalFields.SelCount = 1) and (FListBoxVerticalFields.ItemIndex >= 0) then
@@ -397,6 +469,8 @@ begin
     pt.x:= X;
     pt.y:= Y;
     dest := FListBoxDataFields.ItemAtPos(pt, true);
+    if dest = prev then
+      exit;
     old := FListBoxDataFields.Items[prev];
     oldObj := FListBoxDataFields.Items.Objects[prev];
 
@@ -422,7 +496,7 @@ begin
 
     newSummary := TmSummaryDefinition.Create;
     FGarbage.Add(newSummary);
-    ImportSummaryFromField((oldObj as TmVirtualFieldDef), newSummary);
+    ImportSummaryFromField((oldObj as TFieldDef), newSummary);
 
     if dest >= 0 then
       FListBoxDataFields.Items.InsertObject(dest, old, newSummary)
@@ -440,6 +514,16 @@ end;
 
 procedure TPivotFieldsSettingsFrame.LBDataFieldsSelectionChange(Sender: TObject; User: boolean);
 begin
+  DoTriggerLBDataFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.LBDataFieldsEnter(Sender: TObject);
+begin
+  DoTriggerLBDataFieldsChange;
+end;
+
+procedure TPivotFieldsSettingsFrame.DoTriggerLBDataFieldsChange;
+begin
   ClearProperties;
   if (FListBoxDataFields.SelCount = 1) and (FListBoxDataFields.ItemIndex >= 0) then
   begin
@@ -451,33 +535,41 @@ begin
 end;
 
 
-function TPivotFieldsSettingsFrame.GetLBFieldLine(const aFieldDef: TmVirtualFieldDef): String;
+function TPivotFieldsSettingsFrame.GetLBFieldLine(const aFieldDef: TFieldDef): String;
 begin
-  Result := GenerateDisplayLabel(aFieldDef.Name) + ' [' + aFieldDef.Name + ']';
+  Result := aFieldDef.Name;
 end;
 
 function TPivotFieldsSettingsFrame.GetLBDataFieldLine(const aSummaryDef: TmSummaryDefinition): String;
 begin
-  Result := aSummaryDef.Caption + ' [' + aSummaryDef.FieldName + '] - ' + TmSummaryOperatorToString(aSummaryDef.SummaryOperator);
+  Result := aSummaryDef.FieldName + ' [' + TmSummaryOperatorToString(aSummaryDef.SummaryOperator) + ']';
 end;
 
 function TPivotFieldsSettingsFrame.GetLBVertHorizFieldLine(const aGroupByDef: TmGroupByDef): String;
 begin
-  Result := aGroupByDef.FieldName + ' - ' + TmGroupByOperationKindToString(aGroupByDef.OperationKind);
+  Result := aGroupByDef.FieldName + ' [' + TmGroupByOperationKindToString(aGroupByDef.OperationKind) + ']';
 end;
 
-procedure TPivotFieldsSettingsFrame.ImportGroupByFromField(const aSource: TmVirtualFieldDef; aDestination: TmGroupByDef);
+procedure TPivotFieldsSettingsFrame.ImportGroupByFromField(const aSource: TFieldDef; aDestination: TmGroupByDef);
 begin
   aDestination.FieldName:= aSource.Name;
-  aDestination.DataType:= FromTmVirtualFieldDefTypeToTFieldType(aSource.DataType);
+  aDestination.DataType:= aSource.DataType;
   aDestination.OperationKind:= gpoDistinct;
+  if FieldTypeIsFloat(aDestination.DataType) then
+    aDestination.DisplayFormat.Value := '#,##0.00';
+  aDestination.DisplayLabel.IsNull:= true;
 end;
 
-procedure TPivotFieldsSettingsFrame.ImportSummaryFromField(const aSource: TmVirtualFieldDef; aDestination: TmSummaryDefinition);
+procedure TPivotFieldsSettingsFrame.ImportSummaryFromField(const aSource: TFieldDef; aDestination: TmSummaryDefinition);
 begin
   aDestination.FieldName:= aSource.Name;
-  aDestination.FieldType:= FromTmVirtualFieldDefTypeToTFieldType(aSource.DataType);
+  aDestination.FieldType:= aSource.DataType;
   aDestination.SummaryOperator:= soCount;
+  if FieldTypeIsFloat(aDestination.FieldType) then
+    aDestination.DisplayFormat.Value := '#,##0.00'
+  else if FieldTypeIsInteger(aDestination.FieldType) then
+    aDestination.DisplayFormat.Value := '#,##0';
+  aDestination.DisplayLabel.IsNull:= true;
 end;
 
 procedure TPivotFieldsSettingsFrame.OnGroupDefPropertiesOperatorCBChange(aSender: TObject);
@@ -485,6 +577,17 @@ begin
   if Assigned(FCurrentGroupByDef) and (FGroupDefPropertiesOperatorCB.ItemIndex >= 0) then
   begin
     FCurrentGroupByDef.OperationKind:= (FGroupDefPropertiesOperatorCB.Items.Objects[FGroupDefPropertiesOperatorCB.ItemIndex] as TGroupByOperationKindShell).op;
+    FListBoxHorizontalFields.Invalidate;
+    FListBoxVerticalFields.Invalidate;
+    FSomethingChanged := true;
+  end;
+end;
+
+procedure TPivotFieldsSettingsFrame.OnGroupDefPropertiesSortByCBChange(aSender: TObject);
+begin
+  if Assigned(FCurrentGroupByDef) and (FGroupDefPropertiesSortByCB.ItemIndex >= 0) then
+  begin
+    FCurrentGroupByDef.SortBy := (FGroupDefPropertiesSortByCB.Items.Objects[FGroupDefPropertiesSortByCB.ItemIndex] as TSortByKindShell).sortBy;
     FListBoxHorizontalFields.Invalidate;
     FListBoxVerticalFields.Invalidate;
     FSomethingChanged := true;
@@ -501,12 +604,65 @@ begin
   end;
 end;
 
+procedure TPivotFieldsSettingsFrame.GroupByDefPropertiesLEFormatEditingDone(Sender: TObject);
+begin
+  if Assigned(FCurrentGroupByDef) then
+  begin
+    if Trim(FGroupDefPropertiesLEFormat.Text) <> '' then
+      FCurrentGroupByDef.DisplayFormat.Value:= Trim(FGroupDefPropertiesLEFormat.Text)
+    else
+      FCurrentGroupByDef.DisplayFormat.IsNull:= true;
+    FSomethingChanged := true;
+  end;
+end;
+
+procedure TPivotFieldsSettingsFrame.GroupByDefPropertiesLELabelEditingDone(Sender: TObject);
+begin
+  if Assigned(FCurrentGroupByDef) then
+  begin
+    if Trim(FGroupDefPropertiesLELabel.Text) <> '' then
+      FCurrentGroupByDef.DisplayLabel.Value:= Trim(FGroupDefPropertiesLELabel.Text)
+    else
+      FCurrentGroupByDef.DisplayLabel.IsNull:= true;
+    FListBoxHorizontalFields.Invalidate;
+    FListBoxVerticalFields.Invalidate;
+    FSomethingChanged := true;
+  end;
+end;
+
+procedure TPivotFieldsSettingsFrame.SummaryPropertiesLEFormatEditingDone(Sender: TObject);
+begin
+  if Assigned(FCurrentSummary) then
+  begin
+    if Trim(FSummaryLEFormat.Text) <> '' then
+      FCurrentSummary.DisplayFormat.Value:= Trim(FSummaryLEFormat.Text)
+    else
+      FCurrentSummary.DisplayFormat.IsNull:= true;
+    FSomethingChanged := true;
+  end;
+end;
+
+procedure TPivotFieldsSettingsFrame.SummaryPropertiesLELabelEditingDone(Sender: TObject);
+begin
+  if Assigned(FCurrentSummary) then
+  begin
+    if Trim(FSummaryLELabel.Text) <> '' then
+      FCurrentSummary.DisplayLabel.Assign(Trim(FSummaryLELabel.Text), false)
+    else
+      FCurrentSummary.DisplayLabel.IsNull:= true;
+    FListBoxDataFields.Invalidate;
+    FSomethingChanged := true;
+  end;
+end;
+
 procedure TPivotFieldsSettingsFrame.CreatePropertiesPanel;
 var
   ok : TmGroupByOperationKind;
   tmpOp : TGroupByOperationKindShell;
   so : TmSummaryOperator;
+  ss : TmSortByCondition;
   tmpSo : TSummaryOperatorShell;
+  tmpSort : TSortByKindShell;
 begin
   FPropertiesPanel.BevelOuter := bvNone;
 
@@ -515,6 +671,23 @@ begin
   FGroupDefPropertiesPanel.BevelOuter:= bvNone;
   FGroupDefPropertiesPanel.Align:= alClient;
   FGroupDefPropertiesPanel.Visible := false;
+
+  FGroupDefPropertiesSortByCB := TComboBox.Create(FGroupDefPropertiesPanel);
+  FGroupDefPropertiesSortByCB.Parent := FGroupDefPropertiesPanel;
+  FGroupDefPropertiesSortByCB.Align:= alTop;
+  FGroupDefPropertiesSortByCB.Style:= csDropDownList;
+  FGroupDefPropertiesSortByCB.OnChange:= @OnGroupDefPropertiesSortByCBChange;
+  for ss := Low(TmSortByCondition) to High(TmSortByCondition) do
+  begin
+    tmpSort := TSortByKindShell.Create(ss);
+    FGarbage.Add(tmpSort);
+    FGroupDefPropertiesSortByCB.AddItem(TmSortByConditionToString(ss), tmpSort);
+  end;
+  FGroupDefPropertiesSortByLabel := TLabel.Create(FGroupDefPropertiesPanel);
+  FGroupDefPropertiesSortByLabel.Parent := FGroupDefPropertiesPanel;
+  FGroupDefPropertiesSortByLabel.Align:= alTop;
+  FGroupDefPropertiesSortByLabel.Caption:= SLabelGroupByDefSortBy;
+
 
   FGroupDefPropertiesOperatorCB := TComboBox.Create(FGroupDefPropertiesPanel);
   FGroupDefPropertiesOperatorCB.Parent := FGroupDefPropertiesPanel;
@@ -531,6 +704,30 @@ begin
   FGroupDefPropertiesOperatorLabel.Parent := FGroupDefPropertiesPanel;
   FGroupDefPropertiesOperatorLabel.Align:= alTop;
   FGroupDefPropertiesOperatorLabel.Caption:= SLabelGroupByDefOperator;
+
+  FGroupDefPropertiesFormatPanel:= TPanel.Create(FGroupDefPropertiesPanel);
+  FGroupDefPropertiesFormatPanel.Parent:= FGroupDefPropertiesPanel;
+  FGroupDefPropertiesFormatPanel.Height:= 40;
+  FGroupDefPropertiesFormatPanel.Align:= alTop;
+  FGroupDefPropertiesFormatPanel.BevelOuter:= bvNone;
+
+  FGroupDefPropertiesLabelPanel:= TPanel.Create(FGroupDefPropertiesPanel);
+  FGroupDefPropertiesLabelPanel.Parent:= FGroupDefPropertiesPanel;
+  FGroupDefPropertiesLabelPanel.Height:= 40;
+  FGroupDefPropertiesLabelPanel.Align:= alTop;
+  FGroupDefPropertiesLabelPanel.BevelOuter:= bvNone;
+
+  FGroupDefPropertiesLEFormat:= TLabeledEdit.Create(FGroupDefPropertiesFormatPanel);
+  FGroupDefPropertiesLEFormat.Parent:= FGroupDefPropertiesFormatPanel;
+  FGroupDefPropertiesLEFormat.EditLabel.Caption:= SLabelFormat;
+  FGroupDefPropertiesLEFormat.OnEditingDone:= @GroupByDefPropertiesLEFormatEditingDone;
+  FGroupDefPropertiesLEFormat.Align:= alBottom;
+
+  FGroupDefPropertiesLELabel:= TLabeledEdit.Create(FGroupDefPropertiesLabelPanel);
+  FGroupDefPropertiesLELabel.Parent:= FGroupDefPropertiesLabelPanel;
+  FGroupDefPropertiesLELabel.EditLabel.Caption:= SLabelLabel;
+  FGroupDefPropertiesLELabel.OnEditingDone:= @GroupByDefPropertiesLELabelEditingDone;
+  FGroupDefPropertiesLELabel.Align:= alBottom;
 
   FSummaryPropertiesPanel := TPanel.Create(FPropertiesPanel);
   FSummaryPropertiesPanel.Parent := FPropertiesPanel;
@@ -553,6 +750,31 @@ begin
   FSummaryOperatorLabel.Parent := FSummaryPropertiesPanel;
   FSummaryOperatorLabel.Align:= alTop;
   FSummaryOperatorLabel.Caption:= SLabelSummaryOperator;
+
+  FSummaryPropertiesFormatPanel:= TPanel.Create(FSummaryPropertiesPanel);
+  FSummaryPropertiesFormatPanel.Parent:= FSummaryPropertiesPanel;
+  FSummaryPropertiesFormatPanel.Height:= 40;
+  FSummaryPropertiesFormatPanel.Align:= alTop;
+  FSummaryPropertiesFormatPanel.BevelOuter:= bvNone;
+
+  FSummaryPropertiesLabelPanel:= TPanel.Create(FSummaryPropertiesPanel);
+  FSummaryPropertiesLabelPanel.Parent:= FSummaryPropertiesPanel;
+  FSummaryPropertiesLabelPanel.Height:= 40;
+  FSummaryPropertiesLabelPanel.Align:= alTop;
+  FSummaryPropertiesLabelPanel.BevelOuter:= bvNone;
+
+  FSummaryLEFormat:= TLabeledEdit.Create(FSummaryPropertiesFormatPanel);
+  FSummaryLEFormat.Parent:= FSummaryPropertiesFormatPanel;
+  FSummaryLEFormat.EditLabel.Caption:= SLabelFormat;
+  FSummaryLEFormat.OnEditingDone:= @SummaryPropertiesLEFormatEditingDone;
+  FSummaryLEFormat.Align:= alBottom;
+
+  FSummaryLELabel:= TLabeledEdit.Create(FSummaryPropertiesLabelPanel);
+  FSummaryLELabel.Parent:= FSummaryPropertiesLabelPanel;
+  FSummaryLELabel.EditLabel.Caption:= SLabelLabel;
+  FSummaryLELabel.OnEditingDone:= @SummaryPropertiesLELabelEditingDone;
+  FSummaryLELabel.Align:= alBottom;
+
 end;
 
 procedure TPivotFieldsSettingsFrame.UpdatePropertiesPanel;
@@ -566,8 +788,14 @@ begin
   if FGroupDefPropertiesPanel.Visible then
   begin
     FGroupDefPropertiesOperatorCB.Items.Clear;
+    FGroupDefPropertiesLEFormat.Text:= '';
+    FGroupDefPropertiesLELabel.Text := '';
     if Assigned(FCurrentGroupByDef) then
     begin
+      if FCurrentGroupByDef.DisplayFormat.NotNull then
+        FGroupDefPropertiesLEFormat.Text:= FCurrentGroupByDef.DisplayFormat.AsString;
+      if FCurrentGroupByDef.DisplayLabel.NotNull then
+        FGroupDefPropertiesLELabel.Text := FCurrentGroupByDef.DisplayLabel.AsString;
       i := 0;
       idx := 0;
       for op := Low(TmGroupByOperationKind) to High(TmGroupByOperationKind) do
@@ -583,13 +811,29 @@ begin
         end;
       end;
       FGroupDefPropertiesOperatorCB.ItemIndex:= idx;
+
+      for i := 0 to FGroupDefPropertiesSortByCB.Items.Count - 1 do
+      begin
+        if (FGroupDefPropertiesSortByCB.Items.Objects[i] as TSortByKindShell).sortBy = FCurrentGroupByDef.SortBy then
+        begin
+          FGroupDefPropertiesSortByCB.ItemIndex:= i;
+          break;
+        end;
+      end;
     end;
   end
   else if FSummaryPropertiesPanel.Visible then
   begin
     FSummaryOperatorCB.Items.Clear;
+    FSummaryLEFormat.Text:= '';
+    FSummaryLELabel.Text := '';
     if Assigned(FCurrentSummary) then
     begin
+      if FCurrentSummary.DisplayFormat.NotNull then
+        FSummaryLEFormat.Text:= FCurrentSummary.DisplayFormat.AsString;
+      if FCurrentSummary.DisplayLabel.NotNull then
+        FSummaryLELabel.Text := FCurrentSummary.DisplayLabel.AsString;
+
       i := 0;
       idx := 0;
       for so := Low(TmSummaryOperator) to High(TmSummaryOperator) do
@@ -641,6 +885,7 @@ begin
   FListBoxFields.OnDragDrop:= @LBFieldsDragDrop;
   FListBoxFields.OnDragOver:= @LBFieldsDragOver;
   FListBoxFields.OnSelectionChange:= @LBFieldsSelectionChange;
+  FListBoxFields.OnEnter:= @LBFieldsEnter;
   FListBoxFields.OnDrawItem:= @Self.LBDrawItem;
   FListBoxFields.Style:= lbOwnerDrawFixed;
   FListBoxFields.ItemHeight:= 20;
@@ -679,6 +924,8 @@ begin
   FListBoxHorizontalFields.OnDragDrop:= @LBHorizontalFieldsDragDrop;
   FListBoxHorizontalFields.OnDragOver:= @LBHorizontalFieldsDragOver;
   FListBoxHorizontalFields.OnSelectionChange:= @LBHorizontalFieldsSelectionChange;
+  FListBoxHorizontalFields.OnEnter:= @LBHorizontalFieldsEnter;
+
 //  FListBoxHorizontalFields.OnStartDrag:= @LBFieldsStartDrag;
   FListBoxHorizontalFields.OnDrawItem:= @Self.LBDrawItem;
   FListBoxHorizontalFields.Style:= lbOwnerDrawFixed;
@@ -711,6 +958,7 @@ begin
   FListBoxVerticalFields.OnDragDrop:= @LBVerticalFieldsDragDrop;
   FListBoxVerticalFields.OnDragOver:= @LBVerticalFieldsDragOver;
   FListBoxVerticalFields.OnSelectionChange:= @LBVerticalFieldsSelectionChange;
+  FListBoxVerticalFields.OnEnter:= @LBVerticalFieldsEnter;
 //  FListBoxVerticalFields.OnStartDrag:= @LBVerticalFieldsStartDrag;
   FListBoxVerticalFields.OnDrawItem:= @Self.LBDrawItem;
   FListBoxVerticalFields.Style:= lbOwnerDrawFixed;
@@ -743,6 +991,7 @@ begin
   FListBoxDataFields.OnDragDrop:= @LBDataFieldsDragDrop;
   FListBoxDataFields.OnDragOver:= @LBDataFieldsDragOver;
   FListBoxDataFields.OnSelectionChange:= @LBDataFieldsSelectionChange;
+  FListBoxDataFields.OnEnter:= @LBDataFieldsEnter;
 //  FListBoxDataFields.OnStartDrag:= @LBFieldsStartDrag;
   FListBoxDataFields.OnDrawItem:= @Self.LBDrawItem;
   FListBoxDataFields.Style:= lbOwnerDrawFixed;
@@ -762,6 +1011,11 @@ begin
   begin
     FListBoxHorizontalFields.DeleteSelected;
     FSomethingChanged:= true;
+    if Assigned(FCurrentGroupByDef) then
+      FCurrentGroupByDef := nil;
+    FSummaryPropertiesPanel.Visible := false;
+    FGroupDefPropertiesPanel.Visible:= false;
+    UpdatePropertiesPanel;
   end;
 end;
 
@@ -771,6 +1025,11 @@ begin
   begin
     FListBoxVerticalFields.DeleteSelected;
     FSomethingChanged:= true;
+    if Assigned(FCurrentGroupByDef) then
+      FCurrentGroupByDef := nil;
+    FSummaryPropertiesPanel.Visible := false;
+    FGroupDefPropertiesPanel.Visible:= false;
+    UpdatePropertiesPanel;
   end;
 end;
 
@@ -779,6 +1038,11 @@ begin
   if FListBoxDataFields.ItemIndex >= 0 then
   begin
     FListBoxDataFields.DeleteSelected;
+    if Assigned(FCurrentSummary) then
+      FCurrentSummary := nil;
+    UpdatePropertiesPanel;
+    FSummaryPropertiesPanel.Visible := false;
+    FGroupDefPropertiesPanel.Visible:= false;
     FSomethingChanged:= true;
   end;
 end;
@@ -790,7 +1054,7 @@ begin
   FVerticalGroupByDefs := TmGroupByDefs.Create;
   FHorizontalGroupByDefs := TmGroupByDefs.Create;
   FSummaryDefinitions := TmSummaryDefinitions.Create;
-  FFieldDefs := TmVirtualFieldDefs.Create;
+  FFieldDefs := TFieldDefs.Create(nil);
 
   FGarbageGroupByDefs := TmGroupByDefs.Create;
   FGarbage := TObjectList.Create(true);
@@ -880,10 +1144,10 @@ begin
   FHorizontalGroupByDefs.Assign(aPivoter.HorizontalGroupByDefs);
   FSummaryDefinitions.Assign(aPivoter.SummaryDefinitions);
 
-  aPivoter.DataProvider.FillVirtualFieldDefs(FFieldDefs, '');
+  aPivoter.Provider.FillFieldDefsOfDataset(FFieldDefs, false);
 
   for i := 0 to FFieldDefs.Count - 1 do
-    FListBoxFields.AddItem(GetLBFieldLine(FFieldDefs.VirtualFieldDefs[i]), FFieldDefs.VirtualFieldDefs[i]);
+    FListBoxFields.AddItem(GetLBFieldLine(FFieldDefs.Items[i]), FFieldDefs.Items[i]);
 
   for i := 0 to FHorizontalGroupByDefs.Count - 1 do
     FListBoxHorizontalFields.AddItem(FHorizontalGroupByDefs.Get(i).FieldName, FHorizontalGroupByDefs.Get(i));
