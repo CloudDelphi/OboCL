@@ -25,7 +25,7 @@ uses
   LResources,
   LMessages,
   {$ENDIF}
-  mTimeruler, mGanttDataProvider, mGanttHead;
+  mTimeruler, mGanttDataProvider, mGanttHead, mGanttGUIClasses;
 
 type
 
@@ -42,6 +42,9 @@ type
     FDoubleBufferedBitmap: Graphics.TBitmap;
     FTopRow: integer;
     FCurrentDrawingStartDate, FCurrentDrawingEndDate : TDateTime;
+    FMouseMoveData : TmGanttMouseMoveData;
+    FResizingBar : boolean;
+    FMovingBar : boolean;
 
     procedure SetGanttHead(AValue: TmGanttHead);
     procedure SetTimeRuler(AValue: TmTimeruler);
@@ -53,8 +56,15 @@ type
     procedure DoForEveryRow(aCanvas: TCanvas; const aDrawingRect : TRect; aDrawingAction : TmGanttRowDrawingAction);
     procedure DrawRowBottomLine(aCanvas : TCanvas; const aDrawingRect : TRect; const aRowIndex : integer);
     procedure DrawRowBars(aCanvas : TCanvas; const aDrawingRect : TRect; const aRowIndex : integer);
+    procedure SaveMouseMoveData(X, Y: integer);
+    procedure NotifyBarsChanged(const AMustInvalidateGantt : boolean);
   protected
     procedure Paint; override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer); override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer); override;
+    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
+  public
+    const DELIMITER_CLICKING_AREA : integer = 4;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -71,7 +81,7 @@ type
 implementation
 
 uses
-  math, Forms,
+  math, Forms, sysutils,
   mGanttEvents, mGanttGraphics;
 
 type
@@ -216,7 +226,6 @@ begin
     rowRect.Bottom := rowRect.Bottom + FHead.RowHeight;
     inc(k);
   end;
-
 end;
 
 procedure TmGantt.DrawRowBottomLine(aCanvas: TCanvas; const aDrawingRect: TRect; const aRowIndex : integer);
@@ -254,6 +263,70 @@ begin
   end;
 end;
 
+procedure TmGantt.SaveMouseMoveData(X, Y: integer);
+var
+  tempHeight : integer;
+  bars : TList;
+  currentBar : TmGanttBarDatum;
+  left, right : integer;
+begin
+  FMouseMoveData.Clear;
+
+  if not PtInRect(ClientRect, Classes.Point(X, Y)) then
+    exit;
+
+  FMouseMoveData.CurrentInstant := FTimeRuler.PixelsToDateTime(X);
+
+  if Assigned(FHead.DataProvider) and (FHead.DataProvider.RowCount > 0) then
+  begin
+    tempHeight:= (FHead.DataProvider.RowCount - FHead.TopRow + 1) * FHead.RowHeight;
+
+    if (Y >= 0) and ( Y <= tempHeight) then
+    begin
+      FMouseMoveData.RowIndex := Y  div FHead.RowHeight;
+      {$IFDEF DEBUG}
+      DebugLn('Y:' + IntToStr(Y));
+      DebugLn('Row index:' + IntToStr(FMouseMoveData.RowIndex));
+      {$ENDIF}
+    end;
+
+    if FMouseMoveData.RowIndex < FHead.DataProvider.RowCount then
+    begin
+      bars := TList.Create;
+      try
+        FHead.DataProvider.GetGanttBars(FMouseMoveData.RowIndex, FMouseMoveData.CurrentInstant, FMouseMoveData.CurrentInstant, bars);
+        if bars.Count > 0 then
+        begin
+          FMouseMoveData.MouseOnBar:= true;
+
+          currentBar := TmGanttBarDatum(bars.Items[0]);
+          FMouseMoveData.CurrentBar:= currentBar;
+          FMouseMoveData.CurrentBarOriginalStartTime:= currentBar.StartTime;
+          FMouseMoveData.CurrentBarOriginalEndTime:= currentBar.EndTime;
+
+          right := FTimeRuler.DateTimeToPixels(currentBar.EndTime);
+          if (abs (X - right) <= DELIMITER_CLICKING_AREA) then
+          begin
+            FMouseMoveData.MouseOnBarDelimiter:= true;
+            FMouseMoveData.MouseOnBar:= false;
+          end;
+          {$IFDEF DEBUG}
+          DebugLn('Click on bar');
+          {$ENDIF}
+        end;
+      finally
+        bars.Free;
+      end;
+    end;
+  end;
+end;
+
+procedure TmGantt.NotifyBarsChanged(const AMustInvalidateGantt: boolean);
+begin
+  if AMustInvalidateGantt then
+    Self.Invalidate;
+end;
+
 procedure TmGantt.Paint;
 var
   drawingRect : TRect;
@@ -284,6 +357,69 @@ begin
   end;
 end;
 
+procedure TmGantt.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+begin
+  if FResizingBar or FMovingBar then
+  begin
+    FResizingBar := false;
+    FMovingBar := false;
+    NotifyBarsChanged(false);
+  end;
+  Self.Cursor:= crDefault;
+  inherited MouseUp(Button, Shift, X, Y);
+end;
+
+procedure TmGantt.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+begin
+  if (Button = mbLeft) then
+  begin
+    SaveMouseMoveData(X, Y);
+    if FMouseMoveData.MouseOnBarDelimiter then
+    begin
+      FResizingBar:= true;
+    end
+    else if FMouseMoveData.MouseOnBar then
+    begin
+      FMovingBar := true;
+    end
+  end;
+
+  inherited MouseDown(Button, Shift, X, Y);
+end;
+
+procedure TmGantt.MouseMove(Shift: TShiftState; X, Y: integer);
+var
+  curTime : TDateTime;
+  delta : Double;
+begin
+  if FMovingBar and ({$ifdef windows}GetAsyncKeyState{$else}GetKeyState{$endif}(VK_LBUTTON) and $8000 <> 0) then
+  begin
+    if Assigned(FMouseMoveData.CurrentBar) then
+    begin
+      curTime := FTimeRuler.PixelsToDateTime(X);
+      delta := curTime - FMouseMoveData.CurrentInstant;
+      FMouseMoveData.CurrentBar.StartTime := FMouseMoveData.CurrentBarOriginalStartTime + delta;
+      FMouseMoveData.CurrentBar.EndTime:= FMouseMoveData.CurrentBarOriginalEndTime + delta;
+      NotifyBarsChanged(true);
+    end;
+  end
+  else if FResizingBar and ({$ifdef windows}GetAsyncKeyState{$else}GetKeyState{$endif}(VK_LBUTTON) and $8000 <> 0) then
+  begin
+  end
+  else
+  begin
+    SaveMouseMoveData(X, Y);
+    if FMouseMoveData.MouseOnBarDelimiter then
+      Cursor := crSizeWE
+    else if FMouseMoveData.MouseOnBar then
+      Cursor := crSizeAll
+    else
+      Cursor := crDefault;
+  end;
+
+  inherited MouseMove(Shift, X, Y);
+end;
+
 constructor TmGantt.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -297,11 +433,15 @@ begin
   Self.Color:= clWhite;
   FVerticalLinesColor:= clDkGray;
   FHorizontalLinesColor:= clLtGray;
+  FMouseMoveData:= TmGanttMouseMoveData.Create;
+  FResizingBar:= false;
+  FMovingBar:= false;
 end;
 
 destructor TmGantt.Destroy;
 begin
   FDoubleBufferedBitmap.Free;
+  FMouseMoveData.Free;
   inherited Destroy;
 end;
 
