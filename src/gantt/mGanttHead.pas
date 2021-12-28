@@ -13,17 +13,19 @@ unit mGanttHead;
   {$MODE DELPHI}
 {$ENDIF}
 
+{$I mDefines.inc}
+
 interface
 uses
   Classes, Controls, Graphics, contnrs,
   {$IFDEF FPC}
-  InterfaceBase,
   LCLIntf,
   LclType,
   LclProc,
   LResources,
-  LMessages,
   {$IFDEF DEBUG}LazLogger,{$ENDIF}
+  {$ELSE}
+  Types,
   {$ENDIF}
   {$IFDEF WINDOWS}Windows,{$ENDIF}
   mGanttDataProvider, mTimeruler, mGanttGUIClasses, mGanttEvents;
@@ -125,7 +127,7 @@ begin
         //if RowRect.Top = RowRect.Bottom then
         //  continue;
 
-        DrawHeadBox(ACanvas, RowRect, IntToStr(CurrentRow), taCenter, isFirst);
+        DrawHeadBox(ACanvas, RowRect, FDataProvider.GetHeadText(CurrentRow), taCenter, isFirst);
         isFirst:= false;
 
         RowRect.Top := RowRect.Bottom;
@@ -181,7 +183,7 @@ end;
 
 procedure TmGanttHead.SaveMouseMoveData(X, Y: integer);
 var
-  dummy, tempHeight, timerulHeight : integer;
+  tempHeight, timerulHeight : integer;
   CurrentPixelTop, CurrentPixelBottom : integer;
 begin
   FMouseMoveData.Clear;
@@ -200,10 +202,10 @@ begin
     begin
       FMouseMoveData.ClickOnCell:= true;
       FMouseMoveData.RowIndex := max(0,(Y - timerulHeight - DELIMITER_CLICKING_AREA))  div RowHeight;
-      {$IFDEF DEBUG}
+      {$IFDEF FPC}{$IFDEF DEBUG}
       DebugLn('Y:' + IntToStr(Y));
       DebugLn('Row index:' + IntToStr(FMouseMoveData.RowIndex));
-      {$ENDIF}
+      {$ENDIF}{$ENDIF}
     end;
 
     if (FMouseMoveData.ClickOnCell) then
@@ -215,9 +217,9 @@ begin
         FMouseMoveData.ClickOnCellDelimiter:= true;
         FMouseMoveData.Distance:= Y - CurrentPixelBottom;
         FMouseMoveData.Origin := CurrentPixelBottom;
-        {$IFDEF DEBUG}
+        {$IFDEF FPC}{$IFDEF DEBUG}
         DebugLn('SaveMouseMoveData - Distance [REDUCE]:' + IntToStr(FMouseMoveData.Distance));
-        {$ENDIF}
+        {$ENDIF}{$ENDIF}
       end
       else
       if ((FMouseMoveData.RowIndex <> 0) or (TopRow > 0)) and (abs (Y - CurrentPixelTop) <= DELIMITER_CLICKING_AREA) then
@@ -225,9 +227,9 @@ begin
         FMouseMoveData.ClickOnCellDelimiter:= true;
         FMouseMoveData.Distance:= Y - CurrentPixelTop;
         FMouseMoveData.Origin:= CurrentPixelTop;
-        {$IFDEF DEBUG}
+        {$IFDEF FPC}{$IFDEF DEBUG}
         DebugLn('SaveMouseMoveData - Distance [INCREASE]:' + IntToStr(FMouseMoveData.Distance));
-        {$ENDIF}
+        {$ENDIF}{$ENDIF}
       end;
 
     end;
@@ -294,9 +296,9 @@ begin
     if (FMouseMoveData.CalculatedIncrement = 0) then
     begin
       FMouseMoveData.CalculatedIncrement:= 1 / (FMouseMoveData.RowIndex + 1);
-      {$IFDEF DEBUG}
+      {$IFDEF FPC}{$IFDEF DEBUG}
       DebugLn('Calculated increment:' + FloatToStr(FMouseMoveData.CalculatedIncrement));
-      {$ENDIF}
+      {$ENDIF}{$ENDIF}
     end;
     RowHeight:= max(5, FMouseMoveData.OriginalRowHeight + trunc((Y - FMouseMoveData.Origin) * FMouseMoveData.CalculatedIncrement));
     NotifyLayoutChanged(true);

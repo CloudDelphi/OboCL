@@ -16,7 +16,7 @@ unit mGanttDataProvider;
 interface
 
 uses
-  contnrs, Graphics, Classes,
+  contnrs, Graphics, Classes, Types,
   mGanttEvents;
 
 type
@@ -29,16 +29,70 @@ type
     FEndTime : TDateTime;
     FColor : TColor;
     FBorderColor : TColor;
+    FBarLabel : String;
     FZOrder : integer;
+    FBarRect : TRect;
   public
-    constructor Create;
+    constructor Create; virtual;
 
     property StartTime: TDateTime read FStartTime write FStartTime;
     property EndTime: TDateTime read FEndTime write FEndTime;
     property Color : TColor read FColor write FColor;
     property BorderColor : TColor read FBorderColor write FBorderColor;
     property ZOrder : Integer read FZOrder write FZOrder;
+    property BarLabel : String read FBarLabel write FBarLabel;
+
+    property BarRect : TRect read FBarRect write FBarRect;
   end;
+
+  { TmGanttBarDataList }
+
+  TmGanttBarDataList = class
+  strict private
+    FList : TList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    function Count : integer;
+    procedure Add(const aBarDatum: TmGanttBarDatum);
+    function Get(const aIndex : integer): TmGanttBarDatum;
+    procedure Clear;
+  end;
+
+  { TmGanttHatchDatum }
+
+  TmGanttHatchDatum = class
+  strict private
+    FStartTime : TDateTime;
+    FEndTime : TDateTime;
+    FColor : TColor;
+    FHatchRect : TRect;
+  public
+    constructor Create; virtual;
+
+    property StartTime: TDateTime read FStartTime write FStartTime;
+    property EndTime: TDateTime read FEndTime write FEndTime;
+    property Color : TColor read FColor write FColor;
+
+    property HatchRect : TRect read FHatchRect write FHatchRect;
+  end;
+
+  { TmGanttHatchDataList }
+
+  TmGanttHatchDataList = class
+  strict private
+    FList : TList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    function Count : integer;
+    procedure Add(const aHatchDatum: TmGanttHatchDatum);
+    function Get(const aIndex : integer): TmGanttHatchDatum;
+    procedure Clear;
+  end;
+
 
   { TmGanttDataProvider }
 
@@ -49,7 +103,9 @@ type
     constructor Create; virtual;
     destructor Destroy; override;
     function RowCount : integer; virtual; abstract;
-    procedure GetGanttBars (const aRowIndex : integer; const aStartDate, aEndDate : TDateTime; aGanttBars : TList); virtual; abstract;
+    procedure GetGanttBars (const aRowIndex : integer; const aStartDate, aEndDate : TDateTime; aGanttBars : TmGanttBarDataList); virtual; abstract;
+    procedure GetHatches (const aRowIndex : integer; const aStartDate, aEndDate : TDateTime; aHatches : TmGanttHatchDataList); virtual;
+    function GetHeadText (const aRowIndex : integer): String; virtual;
     function SubscribeToEvents(SubscriberClass: TmGanttDataProviderEventsSubscriptionClass) : TmGanttDataProviderEventsSubscription;
     procedure UnsubscribeFromEvents(Subscription: TmGanttDataProviderEventsSubscription);
   end;
@@ -58,6 +114,81 @@ implementation
 uses
   Math,
   mGraphicsUtility;
+
+{ TmGanttHatchDataList }
+
+constructor TmGanttHatchDataList.Create;
+begin
+  FList := TList.Create;
+end;
+
+destructor TmGanttHatchDataList.Destroy;
+begin
+  FList.Free;
+  inherited Destroy;
+end;
+
+function TmGanttHatchDataList.Count: integer;
+begin
+  Result := FList.Count;
+end;
+
+procedure TmGanttHatchDataList.Add(const aHatchDatum: TmGanttHatchDatum);
+begin
+  FList.Add(aHatchDatum);
+end;
+
+function TmGanttHatchDataList.Get(const aIndex: integer): TmGanttHatchDatum;
+begin
+  Result := TmGanttHatchDatum(FList.Items[aIndex]);
+end;
+
+procedure TmGanttHatchDataList.Clear;
+begin
+  FList.Free;
+end;
+
+{ TmGanttHatchDatum }
+
+constructor TmGanttHatchDatum.Create;
+begin
+  FStartTime:= 0;
+  FEndTime:= 0;
+  FColor:= clNone;
+end;
+
+{ TmGanttBarDataList }
+
+constructor TmGanttBarDataList.Create;
+begin
+  FList := TList.Create;
+end;
+
+destructor TmGanttBarDataList.Destroy;
+begin
+  FList.Free;
+  inherited Destroy;
+end;
+
+function TmGanttBarDataList.Count: integer;
+begin
+  Result := FList.Count;
+end;
+
+procedure TmGanttBarDataList.Add(const aBarDatum: TmGanttBarDatum);
+begin
+  FList.Add(aBarDatum);
+end;
+
+function TmGanttBarDataList.Get(const aIndex: integer): TmGanttBarDatum;
+begin
+  Result := TmGanttBarDatum(FList.Items[aIndex]);
+end;
+
+procedure TmGanttBarDataList.Clear;
+begin
+  FList.Clear;
+end;
 
 { TmGanttBarDatum }
 
@@ -68,6 +199,7 @@ begin
   FColor:= clBlue;
   FBorderColor:= DarkerColor(FColor, 20);
   FZOrder:= 0;
+  FBarLabel := '';
 end;
 
 { TmGanttDataProvider }
@@ -81,6 +213,16 @@ destructor TmGanttDataProvider.Destroy;
 begin
   FEventsSubscriptions.Destroy;
   inherited Destroy;
+end;
+
+procedure TmGanttDataProvider.GetHatches(const aRowIndex: integer; const aStartDate, aEndDate: TDateTime; aHatches: TmGanttHatchDataList);
+begin
+  // do nothing
+end;
+
+function TmGanttDataProvider.GetHeadText(const aRowIndex: integer): String;
+begin
+  Result := '';
 end;
 
 function TmGanttDataProvider.SubscribeToEvents(SubscriberClass: TmGanttDataProviderEventsSubscriptionClass): TmGanttDataProviderEventsSubscription;

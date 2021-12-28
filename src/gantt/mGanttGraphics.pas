@@ -17,13 +17,15 @@ interface
 
 uses
   Classes,
-  {$ifdef fpc}LCLIntf, LCLType, LCLProc, InterfaceBase,{$endif}
-  Graphics, mGanttDataProvider
-  ;
+  {$ifdef fpc}LCLIntf, LCLType, LCLProc, InterfaceBase,{$else}Types, WinTypes, WinProcs,{$endif}
+  {$ifdef windows}Windows,{$endif}
+  Graphics,
+  mGanttDataProvider;
 
 procedure DrawBucketBox(ACanvas: TCanvas; const ARect: TRect; const AText: string; const ATextAlignment: TAlignment);
 procedure DrawHeadBox(ACanvas: TCanvas; const ARect: TRect; const AText: string; const ATextAlignment: TAlignment; const AIsFirst : boolean);
-procedure DrawBar(ACanvas: TCanvas; const ARect: TRect; aBar : TmGanttBarDatum);
+procedure DrawBar(ACanvas: TCanvas; aBar : TmGanttBarDatum);
+procedure DrawHatch(ACanvas: TCanvas; aHatch : TmGanttHatchDatum);
 {$ifdef fpc}
 function IsDoubleBufferedNeeded: boolean;
 {$endif}
@@ -32,15 +34,40 @@ function IsDoubleBufferedNeeded: boolean;
 implementation
 
 uses
-  mGraphicsUtility, SysUtils, Math {$IFDEF WINDOWS},Windows{$ENDIF} {$IFDEF FPC},graphutil{$ENDIF};
+  SysUtils,
+  mGraphicsUtility;
 
-procedure DrawBar(ACanvas: TCanvas; const ARect: TRect; aBar: TmGanttBarDatum);
+var
+  DottedBrush : HBrush;
+
+procedure DrawBar(ACanvas: TCanvas; aBar: TmGanttBarDatum);
 begin
+  ACanvas.Pen.Style:= psSolid;
   ACanvas.Brush.Color:= aBar.Color;
-  ACanvas.FillRect(ARect);
+  ACanvas.Brush.Style:= bsSolid;
+  ACanvas.FillRect(aBar.BarRect);
   ACanvas.Pen.Color:= aBar.BorderColor;
-  ACanvas.Rectangle(ARect.Left, ARect.Top, ARect.Right, ARect.Bottom);
+  ACanvas.Rectangle(aBar.BarRect.Left, aBar.BarRect.Top, aBar.BarRect.Right, aBar.BarRect.Bottom);
 end;
+
+procedure DrawHatch(ACanvas: TCanvas; aHatch: TmGanttHatchDatum);
+const
+  Bits: array[0..7] of Word = ($aa, $55, $aa, $55, $aa, $55, $aa, $55);
+var
+  tmpBitmap: HBitmap;
+begin
+  if DottedBrush = 0 then
+  begin
+    tmpBitmap := CreateBitmap(8, 8, 1, 1, @Bits);
+    DottedBrush := CreatePatternBrush(tmpBitmap);
+    DeleteObject(tmpBitmap);
+  end;
+
+  ACanvas.Font.Color := aHatch.Color;
+  ACanvas.Brush.Color := clWhite;
+  FillRect(ACanvas.Handle, aHatch.HatchRect, DottedBrush);
+end;
+
 
 {$ifdef fpc}
 function IsDoubleBufferedNeeded: boolean;
@@ -49,6 +76,16 @@ begin
 end;
 {$endif}
 
+procedure DrawLine(aCanvas: TCanvas; aX, aY, aX2, aY2 : integer);
+begin
+  {$ifdef fpc}
+    aCanvas.Line(aX, aY, aX2, aY2);
+  {$else}
+    aCanvas.MoveTo(aX, aY);
+    aCanvas.LineTo(aX2, aY2);
+  {$endif}
+end;
+
 procedure DrawBucketBox(ACanvas: TCanvas; const ARect: TRect; const AText: string; const ATextAlignment: TAlignment);
   procedure DrawBox(ACanvas: TCanvas; const ARect: TRect);
   var
@@ -56,9 +93,9 @@ procedure DrawBucketBox(ACanvas: TCanvas; const ARect: TRect; const AText: strin
   begin
     ACanvas.FillRect(ARect);
     ACanvas.Pen.Color:= DarkerColor(ACanvas.Brush.Color, 20);
-    ACanvas.Line(ARect.Left, ARect.Bottom-1, ARect.Right, ARect.Bottom-1);
+    DrawLine(ACanvas, ARect.Left, ARect.Bottom-1, ARect.Right, ARect.Bottom-1);
     lack := (ARect.Top - ARect.Bottom) div 4;
-    ACanvas.Line(ARect.Left, ARect.Bottom + lack, ARect.Left, ARect.Top - lack);
+    DrawLine(ACanvas, ARect.Left, ARect.Bottom + lack, ARect.Left, ARect.Top - lack);
   end;
 var
   BoxRect : TRect;
@@ -76,11 +113,11 @@ procedure DrawHeadBox(ACanvas: TCanvas; const ARect: TRect; const AText: string;
   begin
     ACanvas.FillRect(ARect);
     ACanvas.Pen.Color:= DarkerColor(ACanvas.Brush.Color, 20);
-    ACanvas.Line(ARect.Left, ARect.Bottom-1, ARect.Right, ARect.Bottom-1);
-    ACanvas.Line(ARect.Left, ARect.Bottom, ARect.Left, ARect.Top);
-    ACanvas.Line(ARect.Right-1, ARect.Bottom, ARect.Right-1, ARect.Top);
+    DrawLine(ACanvas, ARect.Left, ARect.Bottom-1, ARect.Right, ARect.Bottom-1);
+    DrawLine(ACanvas, ARect.Left, ARect.Bottom, ARect.Left, ARect.Top);
+    DrawLine(ACanvas, ARect.Right-1, ARect.Bottom, ARect.Right-1, ARect.Top);
     if AIsFirst then
-      ACanvas.Line(ARect.Left, ARect.Top, ARect.Right, ARect.Top);
+      DrawLine(ACanvas, ARect.Left, ARect.Top, ARect.Right, ARect.Top);
   end;
 var
   BoxRect : TRect;
@@ -91,5 +128,10 @@ begin
   WriteText(ACanvas, BoxRect, AText, ATextAlignment, true);
 end;
 
+initialization
+
+finalization
+  if DottedBrush <> 0 then
+    DeleteObject(DottedBrush);
 
 end.
