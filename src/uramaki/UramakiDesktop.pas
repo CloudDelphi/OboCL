@@ -306,6 +306,9 @@ begin
       doc.Free;
     end;
 
+    // Weird! This only to avoid strange random lock under Windows. Still don't know why.
+    // Resolution: avoid use of Application.TaskBarBehavior:= tbMultiButton under Windows 10
+    // Self.FParentControl.SetFocus;
   finally
     TWaitCursor.UndoWaitCursor('TUramakiDesktopManager.LoadFromStream');
   end;

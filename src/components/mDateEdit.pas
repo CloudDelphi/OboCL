@@ -19,6 +19,9 @@ uses
   Classes, EditBtn, Graphics,
   mUtility;
 
+resourcestring
+  rsCalendarFormCaption = 'Select a date';
+
 type
 
   { TmDateEdit }
