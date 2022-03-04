@@ -311,15 +311,15 @@ end;
 procedure TSummaryLabel.OnCopySummaryToClipboard(Sender: TObject);
 begin
   if VarIsNull(FRawValue) then
-    Clipboard.AsText:= ''
+    CopyTextToClipboard('')
   else
   begin
     if FDataType = svtDate then
-      Clipboard.AsText:= DateToStr(FRawValue)
+      CopyTextToClipboard(DateToStr(FRawValue))
     else if FDataType = svtDateTime then
-      Clipboard.AsText:= DateTimeToStr(FRawValue)
+      CopyTextToClipboard(DateTimeToStr(FRawValue))
     else
-      Clipboard.AsText:= VarToStr(FRawValue);
+      CopyTextToClipboard(VarToStr(FRawValue));
   end;
 end;
 
@@ -472,9 +472,9 @@ begin
 
   itm := TMenuItem.Create(FConfigurePopupMenu);
   FConfigurePopupMenu.Items.Add(itm);
-  itm.OnClick:= FGridHelper.OnExportGridAsXls;
-  itm.Hint:= SExportGridAsXlsCommandHint;
-  itm.Caption:= SExportGridAsXlsCommandCaption;
+  itm.OnClick:= FGridHelper.OnExportGridAsXlsx;
+  itm.Hint:= SExportGridAsXlsxCommandHint;
+  itm.Caption:= SExportGridAsXlsxCommandCaption;
 
   itm := TMenuItem.Create(FConfigurePopupMenu);
   FConfigurePopupMenu.Items.Add(itm);
