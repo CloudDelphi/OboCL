@@ -21,7 +21,7 @@ interface
 
 uses
   Classes, Controls, Forms, ValEdit, Graphics, Grids, contnrs, ExtCtrls,
-  SysUtils, variants, StdCtrls, Buttons, CheckLst,
+  SysUtils, variants, StdCtrls, Buttons, CheckLst, Menus,
   OMultiPanelSetup, OMultiPanel,
   mGridEditors, mMaps, mCalendarDialog, mUtility, mMathUtility,
   mLookupForm, mlookupformInstantQuery,
@@ -46,6 +46,7 @@ resourcestring
   SErrorYearInTheFuture = 'Year in the future.';
   SErrorYearTooFaraway = 'Year too faraway.';
   SMultiEditClearValues = 'To be cleared';
+  SMenuCustomizeLinesOrder = 'Customize order of lines...';
 
 type
 
@@ -59,6 +60,7 @@ type
   TmOnValidateValueEvent = procedure (aSender : TmEditingPanel; const aName : string; const aOldDisplayValue : String; var aNewDisplayValue : String; const aOldActualValue: Variant; var aNewActualValue: variant; out aErrorMessage : string) of object;
   TmOnShowDialogEvent = function (aSender : TmEditingPanel; const aName: string; const aOldDisplayValue : String; var aNewDisplayValue : String; const aOldActualValue: Variant; var aNewActualValue: variant): boolean of object;
   TmOnActivateWizardEvent = function (aSender : TmEditingPanel; const aName: string; const aOldDisplayValue : String; var aNewDisplayValue : String; const aOldActualValue: Variant; var aNewActualValue: variant): boolean of object;
+  TmOnCustomizeOrderOfLines = procedure (aSender : TmEditingPanel; const aLinesList : TStringList) of object;
 
   { TmEditorLineConfiguration }
 
@@ -130,6 +132,7 @@ type
     FRootPanel : TOMultiPanel;
     FClearValuesPanel : TPanel;
     FValueListEditor: TmValueListEditor;
+    FValueListPopupMenu : TPopupMenu;
     FDateCellEditor : TmExtButtonTextCellEditor;
     FButtonCellEditor : TmExtButtonTextCellEditor;
     FWizardCellEditor : TmExtButtonTextCellEditor;
@@ -144,13 +147,16 @@ type
     FOnValidateValueEvent: TmOnValidateValueEvent;
     FOnShowDialogEvent: TmOnShowDialogEvent;
     FOnActivateWizardEvent: TmOnActivateWizardEvent;
+    FOnCustomizeOrderOfLinesEvent : TmOnCustomizeOrderOfLines;
     FMultiEditMode : boolean;
     FSomethingChanged : boolean;
     FCommitted : boolean;
     FLastEditorUsed : string;
+    FLinesSortOrderCustomizationMenuItem : TMenuItem;
 
     function GetAlternateColor: TColor;
     procedure SetAlternateColor(AValue: TColor);
+    procedure SetOnCustomizeOrderOfLinesEvent(AValue: TmOnCustomizeOrderOfLines);
 
     procedure OnValueListEditorPrepareCanvas(sender: TObject; aCol, aRow: Integer; aState: TGridDrawState);
     procedure OnValueListEditorSelectEditor(Sender: TObject; aCol,  aRow: Integer; var Editor: TWinControl);
@@ -170,6 +176,7 @@ type
     procedure CheckMonth(const aOldStringValue : string; const aDataType: TmEditorLineDataType; var aNewStringValue : string; var aActualValue : variant);
     procedure CheckFloat (const aOldStringValue : string; var aNewStringValue : string; var aActualValue : variant; const aLineConfiguration : TmEditorLineConfiguration);
     procedure CheckColor (const aOldStringValue : string; var aNewStringValue : string; var aActualValue : variant);
+    procedure OnClickLinesSortOrderCustomizationMenuItem(aSender : TObject);
   private
     procedure SetMultiEditMode(AValue: boolean);
   public
@@ -191,7 +198,7 @@ type
 
     function GetConfigurationForLine (const aName : string): TmEditorLineConfiguration;
 
-    procedure Run;
+    procedure Run(const aCustomizedSortOrder : TStringList = nil);
 
     property AlternateColor : TColor read GetAlternateColor write SetAlternateColor;
     property MultiEditMode : boolean read FMultiEditMode write SetMultiEditMode;
@@ -200,6 +207,7 @@ type
     property OnValidateValue: TmOnValidateValueEvent read FOnValidateValueEvent write FOnValidateValueEvent;
     property OnShowDialog : TmOnShowDialogEvent read FOnShowDialogEvent write FOnShowDialogEvent;
     property OnActivateWizard : TmOnActivateWizardEvent read FOnActivateWizardEvent write FOnActivateWizardEvent;
+    property OnCustomizeOrderOfLinesEvent : TmOnCustomizeOrderOfLines read FOnCustomizeOrderOfLinesEvent write SetOnCustomizeOrderOfLinesEvent;
 
     property SomethingChanged : boolean read FSomethingChanged;
   end;
@@ -236,7 +244,7 @@ uses
   {$ENDIF}
   LCLType,
   Dialogs, dateutils,
-  mToast, mFormSetup, mMagnificationFactor;
+  mToast, mFormSetup, mMagnificationFactor, mIntList, mBaseClassesAsObjects, mEditingFormLinesConfigurationForm;
 
 type
 
@@ -460,7 +468,7 @@ begin
   FOkToAllBtn.Left := 0;
   FOkToAllBtn.Top := ScaleForMagnification(8, true);
   FOkToAllBtn.Anchors:= [akTop, akRight];
-  FOkToAllBtn.DefaultCaption:= true;
+  // FOkToAllBtn.DefaultCaption:= true;
   FOkToAllBtn.OnClick:= OkToAllBtnClick;
   FOkToAllBtn.ModalResult:= mrNone;
   FOkToAllBtn.Visible := false;
@@ -1076,85 +1084,135 @@ begin
     Result := nil;
 end;
 
-procedure TmEditingPanel.Run;
+procedure TmEditingPanel.Run (const aCustomizedSortOrder : TStringList = nil);
 var
-  i, k : integer;
+  j, k : integer;
   curLine : TEditorLine;
   str : String;
   curDatum : IVDDatum;
   curValue : Variant;
+  sortedLines : TIntegerList;
+  indexLines : TmStringDictionary;
+  addedLines : TmStringDictionary;
+  curIndex : TIntegerObject;
 begin
-  for i := 0 to FLines.Count - 1 do
-  begin
-    curLine := FLines.Items[i] as TEditorLine;
-
-    if not Assigned(curLine.Configuration.ChangedValueDestination) then
-      raise Exception.Create('Nullable destination not set for field ' + curLine.Name);
-
-    curLine.ActualValue:= curLine.Configuration.ChangedValueDestination.AsVariant;
-
-    if (curLine.Configuration.DataType = dtFloat) and (curLine.Configuration.ChangedValueDestination is TNullableDouble) then
+  sortedLines := TIntegerList.Create;
+  try
+    if Assigned(aCustomizedSortOrder) then
     begin
-      curLine.Configuration.FDisplayFormat:= (curLine.Configuration.ChangedValueDestination as TNullableDouble).DisplayFormat;
-      curLine.Configuration.FFractionalPartDigits := (curLine.Configuration.ChangedValueDestination as TNullableDouble).FractionalPartDigits;
-      curLine.Configuration.FRoundingMethod:= (curLine.Configuration.ChangedValueDestination as TNullableDouble).RoundingMethod;
-      str := curLine.Configuration.ChangedValueDestination.AsString;
-    end
-    else if (curLine.Configuration.DataType = dtDate) and (curLine.Configuration.ChangedValueDestination is TNullableDateTime) then
-      str := (curLine.Configuration.ChangedValueDestination as TNullableDateTime).AsString(false)
-    else if (curLine.Configuration.DataType = dtDateTime) and (curLine.Configuration.ChangedValueDestination is TNullableDateTime) then
-      str := (curLine.Configuration.ChangedValueDestination as TNullableDateTime).AsString(true)
-    else if (curLine.Configuration.DataType = dtColor) then
-      str := (curLine.Configuration.ChangedValueDestination as TNullableColor).AsString
-    else if (curLine.Configuration.DataType = dtTime) and (curLine.Configuration.ChangedValueDestination is TNullableTime) then
-      str := (curLine.Configuration.ChangedValueDestination as TNullableTime).AsString
-    else if ((curLine.Configuration.EditorKind = ekLookup) or ((curLine.Configuration.EditorKind = ekLookupPlusWizard))) and (curLine.Configuration.ChangedValueDestination.NotNull) then
-    begin
-      assert (Assigned(curLine.Configuration.DataProvider));
-
-      if (curLine.Configuration.DisplayLabelFieldNames.Count = 0)  then
-        curLine.Configuration.DataProvider.GetMinimumFields(curLine.Configuration.DisplayLabelFieldNames);
-
-      if curLine.Configuration.AlternativeKeyFieldName = '' then
-        curDatum := curLine.Configuration.DataProvider.FindDatumByStringKey(curLine.Configuration.ChangedValueDestination.AsString)
-      else
-      begin
-        curDatum := nil;
-        for k := 0 to curLine.Configuration.DataProvider.Count - 1 do
+      indexLines := TmStringDictionary.Create(true);
+      addedLines := TmStringDictionary.Create(false);
+      try
+        for j := 0 to FLines.Count - 1 do
         begin
-          curValue := curLine.Configuration.DataProvider.GetDatum(k).GetPropertyByFieldName(curLine.Configuration.AlternativeKeyFieldName);
-          if CompareVariants(curValue, curLine.Configuration.ChangedValueDestination.AsVariant) = 0 then
+          curLine := FLines.Items[j] as TEditorLine;
+          indexLines.Add(curLine.Name, TIntegerObject.Create(j));
+        end;
+
+        for j := 0 to aCustomizedSortOrder.Count - 1 do
+        begin
+          if not addedLines.Contains(aCustomizedSortOrder.Strings[j]) then
           begin
-            curDatum := curLine.Configuration.DataProvider.GetDatum(k);
-            break;
+            curIndex := indexLines.Find(aCustomizedSortOrder.Strings[j]) as TIntegerObject;
+            if Assigned(curIndex) then
+            begin
+              sortedLines.Add(curIndex.Value);
+              addedLines.Add(aCustomizedSortOrder.Strings[j], addedLines);
+            end;
           end;
         end;
+
+        for j := 0 to FLines.Count -1 do
+        begin
+          curLine := FLines.Items[j] as TEditorLine;
+          if not addedLines.Contains(curLine.Name) then
+            sortedLines.Add(j);
+        end;
+      finally
+        indexLines.Free;
+        addedLines.Free;
       end;
-      if Assigned(curDatum) then
-        str := ConcatenateFieldValues(curDatum, curLine.Configuration.DisplayLabelFieldNames)
-      else
-        str := curLine.Configuration.ChangedValueDestination.AsString;
-    end
-    else if ((curLine.Configuration.EditorKind = ekLookupInstantQuery) or (curLine.Configuration.EditorKind = ekLookupInstantQueryPlusWizard)) and Assigned(curLine.Configuration.StartDatum) then
-    begin
-      if (curLine.Configuration.DisplayLabelFieldNames.Count = 0)  then
-        curLine.Configuration.InstantQueryManager.GetDataProvider.GetMinimumFields(curLine.Configuration.DisplayLabelFieldNames);
-      str := ConcatenateFieldValues(curLine.Configuration.StartDatum, curLine.Configuration.DisplayLabelFieldNames);
     end
     else
-      str := curLine.Configuration.ChangedValueDestination.AsString;
+    begin
+      for j := 0 to FLines.Count - 1 do
+        sortedLines.Add(j);
+    end;
 
-    curLine.Index:= FValueListEditor.InsertRow(ComposeCaption(curLine.Configuration.Caption, curLine.Configuration.Mandatory), str, true);
+    for j := 0 to sortedLines.Count - 1 do
+    begin
+      curLine := FLines.Items[sortedLines.Items[j]] as TEditorLine;
 
-    FLinesByRowIndex.Add(curLine.RowIndex, curLine);
-    FValueListEditor.ItemProps[curLine.Index].ReadOnly:= (curLine.Configuration.ReadOnly <> roAllowEditing);
-    if (curLine.Configuration.ReadOnly = roAllowEditing) and ((curLine.Configuration.EditorKind = ekCalendar) or (curLine.Configuration.EditorKind = ekLookup)
-      or (curLine.Configuration.EditorKind = ekColorDialog) or (curLine.Configuration.EditorKind = ekLookupInstantQuery)
-      or (curLine.Configuration.EditorKind = ekDialog) or (curLine.Configuration.EditorKind = ekWizard) or (curLine.Configuration.EditorKind = ekLookupPlusWizard) or (curLine.Configuration.EditorKind = ekLookupInstantQueryPlusWizard)) then
-        FValueListEditor.ItemProps[curLine.Index].EditStyle:=esEllipsis;
+      if not Assigned(curLine.Configuration.ChangedValueDestination) then
+        raise Exception.Create('Nullable destination not set for field ' + curLine.Name);
 
-    if MultiEditMode and Assigned(FClearValuesList) then
-      FClearValuesList.AddItem(curLine.Configuration.Caption, curLine);
+      curLine.ActualValue:= curLine.Configuration.ChangedValueDestination.AsVariant;
+
+      if (curLine.Configuration.DataType = dtFloat) and (curLine.Configuration.ChangedValueDestination is TNullableDouble) then
+      begin
+        curLine.Configuration.FDisplayFormat:= (curLine.Configuration.ChangedValueDestination as TNullableDouble).DisplayFormat;
+        curLine.Configuration.FFractionalPartDigits := (curLine.Configuration.ChangedValueDestination as TNullableDouble).FractionalPartDigits;
+        curLine.Configuration.FRoundingMethod:= (curLine.Configuration.ChangedValueDestination as TNullableDouble).RoundingMethod;
+        str := curLine.Configuration.ChangedValueDestination.AsString;
+      end
+      else if (curLine.Configuration.DataType = dtDate) and (curLine.Configuration.ChangedValueDestination is TNullableDateTime) then
+        str := (curLine.Configuration.ChangedValueDestination as TNullableDateTime).AsString(false)
+      else if (curLine.Configuration.DataType = dtDateTime) and (curLine.Configuration.ChangedValueDestination is TNullableDateTime) then
+        str := (curLine.Configuration.ChangedValueDestination as TNullableDateTime).AsString(true)
+      else if (curLine.Configuration.DataType = dtColor) then
+        str := (curLine.Configuration.ChangedValueDestination as TNullableColor).AsString
+      else if (curLine.Configuration.DataType = dtTime) and (curLine.Configuration.ChangedValueDestination is TNullableTime) then
+        str := (curLine.Configuration.ChangedValueDestination as TNullableTime).AsString
+      else if ((curLine.Configuration.EditorKind = ekLookup) or ((curLine.Configuration.EditorKind = ekLookupPlusWizard))) and (curLine.Configuration.ChangedValueDestination.NotNull) then
+      begin
+        assert (Assigned(curLine.Configuration.DataProvider));
+
+        if (curLine.Configuration.DisplayLabelFieldNames.Count = 0)  then
+          curLine.Configuration.DataProvider.GetMinimumFields(curLine.Configuration.DisplayLabelFieldNames);
+
+        if curLine.Configuration.AlternativeKeyFieldName = '' then
+          curDatum := curLine.Configuration.DataProvider.FindDatumByStringKey(curLine.Configuration.ChangedValueDestination.AsString)
+        else
+        begin
+          curDatum := nil;
+          for k := 0 to curLine.Configuration.DataProvider.Count - 1 do
+          begin
+            curValue := curLine.Configuration.DataProvider.GetDatum(k).GetPropertyByFieldName(curLine.Configuration.AlternativeKeyFieldName);
+            if CompareVariants(curValue, curLine.Configuration.ChangedValueDestination.AsVariant) = 0 then
+            begin
+              curDatum := curLine.Configuration.DataProvider.GetDatum(k);
+              break;
+            end;
+          end;
+        end;
+        if Assigned(curDatum) then
+          str := ConcatenateFieldValues(curDatum, curLine.Configuration.DisplayLabelFieldNames)
+        else
+          str := curLine.Configuration.ChangedValueDestination.AsString;
+      end
+      else if ((curLine.Configuration.EditorKind = ekLookupInstantQuery) or (curLine.Configuration.EditorKind = ekLookupInstantQueryPlusWizard)) and Assigned(curLine.Configuration.StartDatum) then
+      begin
+        if (curLine.Configuration.DisplayLabelFieldNames.Count = 0)  then
+          curLine.Configuration.InstantQueryManager.GetDataProvider.GetMinimumFields(curLine.Configuration.DisplayLabelFieldNames);
+        str := ConcatenateFieldValues(curLine.Configuration.StartDatum, curLine.Configuration.DisplayLabelFieldNames);
+      end
+      else
+        str := curLine.Configuration.ChangedValueDestination.AsString;
+
+      curLine.Index:= FValueListEditor.InsertRow(ComposeCaption(curLine.Configuration.Caption, curLine.Configuration.Mandatory), str, true);
+
+      FLinesByRowIndex.Add(curLine.RowIndex, curLine);
+      FValueListEditor.ItemProps[curLine.Index].ReadOnly:= (curLine.Configuration.ReadOnly <> roAllowEditing);
+      if (curLine.Configuration.ReadOnly = roAllowEditing) and ((curLine.Configuration.EditorKind = ekCalendar) or (curLine.Configuration.EditorKind = ekLookup)
+        or (curLine.Configuration.EditorKind = ekColorDialog) or (curLine.Configuration.EditorKind = ekLookupInstantQuery)
+        or (curLine.Configuration.EditorKind = ekDialog) or (curLine.Configuration.EditorKind = ekWizard) or (curLine.Configuration.EditorKind = ekLookupPlusWizard) or (curLine.Configuration.EditorKind = ekLookupInstantQueryPlusWizard)) then
+          FValueListEditor.ItemProps[curLine.Index].EditStyle:=esEllipsis;
+
+      if MultiEditMode and Assigned(FClearValuesList) then
+        FClearValuesList.AddItem(curLine.Configuration.Caption, curLine);
+    end;
+  finally
+    sortedLines.Free;
   end;
 end;
 
@@ -1464,6 +1522,42 @@ begin
     aActualValue := null;
 end;
 
+procedure TmEditingPanel.OnClickLinesSortOrderCustomizationMenuItem(aSender: TObject);
+var
+  frm : TEditingFormLinesSettingsForm;
+  settings : TEditingFormLinesSettings;
+  i : integer;
+  el : TEditorLine;
+  linesList : TStringList;
+begin
+  if not Assigned(FOnCustomizeOrderOfLinesEvent) then
+    exit;
+
+  frm := TEditingFormLinesSettingsForm.Create(Self);
+  settings := TEditingFormLinesSettings.Create;
+  try
+    for i := 1 to FLines.Count do
+    begin
+      el := FLinesByRowIndex.Find(i) as TEditorLine;
+      settings.Add(TEditingFormLineSettings.Create(el.Name, el.Configuration.Caption));
+    end;
+    frm.Init(settings);
+    if frm.ShowModal = mrOK then
+    begin
+      linesList := TStringList.Create;
+      try
+        frm.ExtractSettings(linesList);
+        Self.FOnCustomizeOrderOfLinesEvent(Self, linesList);
+      finally
+        linesList.Free;
+      end;
+    end;
+  finally
+    frm.Free;
+    settings.Free;
+  end;
+end;
+
 constructor TmEditingPanel.Create(TheOwner: TComponent);
 begin
   inherited Create(TheOwner);
@@ -1501,6 +1595,9 @@ begin
   FValueListEditor.TitleCaptions.Add(SValueColumnTitle);
   FValueListEditor.ColWidths[0] := 400;
   FValueListEditor.ColWidths[1] := 500;
+
+  FValueListPopupMenu := TPopupMenu.Create(FValueListEditor);
+  FValueListEditor.PopupMenu := FValueListPopupMenu;
 
   FDateCellEditor := TmExtButtonTextCellEditor.Create(Self);
   FDateCellEditor.Visible := false;
@@ -1548,6 +1645,7 @@ begin
   FOnValidateValueEvent:= nil;
   FOnShowDialogEvent:= nil;
   FOnActivateWizardEvent:= nil;
+  FOnCustomizeOrderOfLinesEvent:= nil;
 end;
 
 destructor TmEditingPanel.Destroy;
@@ -1618,6 +1716,26 @@ begin
   begin
     if Assigned(FClearValuesPanel) then
       FClearValuesPanel.Visible:= false;
+  end;
+end;
+
+procedure TmEditingPanel.SetOnCustomizeOrderOfLinesEvent(AValue: TmOnCustomizeOrderOfLines);
+begin
+  FOnCustomizeOrderOfLinesEvent:=AValue;
+  if Assigned(FOnCustomizeOrderOfLinesEvent) then
+  begin
+    if not Assigned(FLinesSortOrderCustomizationMenuItem) then
+    begin
+      FLinesSortOrderCustomizationMenuItem := TMenuItem.Create(FValueListPopupMenu);
+      FValueListPopupMenu.Items.Add(FLinesSortOrderCustomizationMenuItem);
+      FLinesSortOrderCustomizationMenuItem.Caption:= SMenuCustomizeLinesOrder;
+      FLinesSortOrderCustomizationMenuItem.OnClick:= OnClickLinesSortOrderCustomizationMenuItem;
+    end;
+  end
+  else
+  begin
+    if Assigned(FLinesSortOrderCustomizationMenuItem) then
+      FLinesSortOrderCustomizationMenuItem.Visible:= false;
   end;
 end;
 
